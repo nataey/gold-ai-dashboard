@@ -7,10 +7,10 @@ from datetime import datetime, timedelta
 import re
 
 # ตั้งค่าหน้าเว็บ
-st.set_page_config(page_title="Gold AI Analyst", page_icon="💰")
+st.set_page_config(page_title="Gold AI Specialist", page_icon="💰", layout="wide")
 
 st.title("💰 Gold Market Intelligence Agent")
-st.caption("วิเคราะห์ตลาดทองคำด้วย AI (Gemini 2.5 Flash)")
+st.caption("วิเคราะห์เจาะลึกข่าวสารที่มีผลต่อราคาทองคำโดย AI")
 
 # ==============================================================================
 # 🔴 ส่วนดึงรหัสจาก Secrets
@@ -19,7 +19,7 @@ try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     NEWS_API_KEY = st.secrets["NEWS_API_KEY"]
 except:
-    st.error("❌ ไม่พบ API Key ใน Secrets! กรุณาตั้งค่าใน Streamlit Cloud")
+    st.error("❌ ไม่พบ API Key! กรุณาตั้งค่าใน Streamlit Cloud")
     st.stop()
 
 # ==============================================================================
@@ -41,22 +41,32 @@ def find_best_model():
     except:
         return "models/gemini-1.5-flash"
 
-def get_market_sentiment(model_name, all_news_text):
+def get_detailed_analysis(model_name, news_list):
     clean_model_name = model_name.replace("models/", "")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{clean_model_name}:generateContent?key={GEMINI_API_KEY}"
     headers = {'Content-Type': 'application/json'}
     
+    # ส่งข่าวทั้งหมดไปให้ AI วิเคราะห์แยกเป็นรายชิ้น
+    news_input = ""
+    for i, n in enumerate(news_list):
+        news_input += f"ข่าวที่ {i+1}: {n['title']} - {n['description']}\n\n"
+
     prompt = f"""
-    Role: Gold Strategist.
-    Input News:
-    {all_news_text}
+    ในฐานะนักกลยุทธ์ทองคำ วิเคราะห์ข่าวต่อไปนี้และตอบในรูปแบบ JSON ภาษาไทยเท่านั้น:
+    {news_input}
     
-    Task: Analyze sentiment for XAU/USD. Response in Thai JSON ONLY:
+    รูปแบบที่ต้องการ:
     {{
-        "market_status": "สภาวะตลาดสั้นๆ",
-        "sentiment_score": "คะแนน 0-100 (เป็นตัวเลข)",
-        "action_plan": "คำแนะนำสั้นๆ",
-        "key_factors": "ปัจจัยหลัก"
+        "individual_news": [
+            {{
+                "title": "หัวข้อข่าวภาษาไทย",
+                "summary": "สรุปเนื้อหาสำคัญสั้นๆ",
+                "weight": "คะแนนผลกระทบต่อราคาทอง (0-100 โดย 0=ลบมาก, 100=บวกมาก)"
+            }}
+        ],
+        "overall_sentiment_score": "คะแนนเฉลี่ยภาพรวม",
+        "overall_summary": "สรุปภาพรวมตลาด",
+        "action_plan": "คำแนะนำการลงทุน"
     }}
     """
     data = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -74,20 +84,16 @@ def clean_json_text(text):
     return text.strip()
 
 # ==============================================================================
-# หน้าจอแสดงผล
+# ส่วนแสดงผล Dashboard
 # ==============================================================================
 
-if st.button("🚀 เริ่มวิเคราะห์ตลาด (Analyze Now)", type="primary"):
-    with st.spinner('📡 กำลังรวบรวมข่าวและประมวลผล...'):
-        # 1. ดึงข่าว
+if st.button("🚀 เริ่มการวิเคราะห์เชิงลึก", type="primary"):
+    with st.spinner('📡 กำลังกวาดข่าวและให้น้ำหนักคะแนน...'):
         newsapi = NewsApiClient(api_key=NEWS_API_KEY)
-        keywords = ["Gold Price", "Federal Reserve", "US Economy", "Trump"]
-        today = datetime.now()
-        yesterday = today - timedelta(days=2)
-        
+        keywords = ["Gold Price", "US Federal Reserve", "Trump Policy"]
         all_articles = newsapi.get_everything(
             q=" OR ".join(keywords),
-            from_param=yesterday.strftime('%Y-%m-%d'),
+            from_param=(datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d'),
             language='en',
             sort_by='relevancy',
             page_size=5
@@ -95,34 +101,37 @@ if st.button("🚀 เริ่มวิเคราะห์ตลาด (Analy
         articles = all_articles.get('articles', [])
 
         if articles:
-            news_text = ""
-            for i, article in enumerate(articles, 1):
-                news_text += f"{i}. {article['title']}\n"
-            
-            # 2. ส่ง AI วิเคราะห์
             best_model = find_best_model()
-            raw_res = get_market_sentiment(best_model, news_text)
+            raw_res = get_detailed_analysis(best_model, articles)
             
             if raw_res:
                 try:
                     analysis = json.loads(clean_json_text(raw_res))
                     
+                    # 1. แสดงคะแนนภาพรวม
                     st.divider()
-                    st.header("📊 ผลการวิเคราะห์")
-                    
-                    score = int(analysis.get('sentiment_score', 50))
-                    st.metric("Sentiment Score", f"{score}/100")
-                    
-                    if score >= 60: st.success("📈 แนวโน้ม: ขาขึ้น (Bullish)")
-                    elif score <= 40: st.error("📉 แนวโน้ม: ขาลง (Bearish)")
-                    else: st.warning("⚖️ แนวโน้ม: ไซด์เวย์ (Neutral)")
+                    col_a, col_b = st.columns([1, 2])
+                    with col_a:
+                        st.metric("Overall Score", f"{analysis.get('overall_sentiment_score')}/100")
+                    with col_b:
+                        st.info(f"**กลยุทธ์:** {analysis.get('action_plan')}")
 
-                    st.write(f"**🌊 สภาวะตลาด:** {analysis.get('market_status')}")
-                    st.write(f"**💡 คำแนะนำ:** {analysis.get('action_plan')}")
-                    st.write(f"**🔑 ปัจจัยสำคัญ:** {analysis.get('key_factors')}")
-                    st.caption(f"โมเดลที่ใช้: {best_model}")
-                    
-                except:
-                    st.error("เกิดข้อผิดพลาดในการอ่านข้อมูลจาก AI")
+                    # 2. แสดงรายละเอียดรายข่าว (จุดที่เพิ่มใหม่)
+                    st.subheader("📰 วิเคราะห์รายข่าว (News Breakdown)")
+                    for news in analysis.get('individual_news', []):
+                        with st.container(border=True):
+                            c1, c2 = st.columns([4, 1])
+                            with c1:
+                                st.write(f"**{news.get('title')}**")
+                                st.caption(news.get('summary'))
+                            with c2:
+                                weight = int(news.get('weight', 50))
+                                st.write(f"คะแนน: **{weight}**")
+                                if weight >= 60: st.write("🟢 บวก")
+                                elif weight <= 40: st.write("🔴 ลบ")
+                                else: st.write("🟡 กลาง")
+
+                except Exception as e:
+                    st.error(f"การประมวลผลผิดพลาด: {e}")
         else:
-            st.warning("ไม่พบข่าวใหม่ในขณะนี้")
+            st.warning("ไม่พบข่าวใหม่")
